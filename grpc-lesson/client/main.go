@@ -22,7 +22,8 @@ func main() {
 	client := pb.NewFileServiceClient(conn)
 	// callListFiles(client)
 	// callDownload(client)
-	callUpload(client)
+	// callUpload(client)
+	callUploadAndNotifyProgress(client)
 }
 
 func callListFiles(client pb.FileServiceClient) {
@@ -96,4 +97,64 @@ func callUpload(client pb.FileServiceClient) {
 		log.Fatalln(err)
 	}
 	log.Printf("recieved data size: %v", res.GetSize())
+}
+
+func callUploadAndNotifyProgress(client pb.FileServiceClient) {
+	filename := "sports.txt"
+
+	path := fmt.Sprintf("/workspaces/grpc/grpc-lesson/storage/%s", filename)
+
+	file, err := os.Open(path)
+	if err != nil {
+		log.Fatalln(err)
+	}
+	defer file.Close()
+	stream, err := client.UploadAndNotifyProgress(context.Background())
+	if err != nil {
+		log.Fatalln(err)
+	}
+
+	// req
+	buf := make([]byte, 5)
+	go func() {
+		for {
+			n, err := file.Read(buf)
+			if n == 0 || err == io.EOF {
+				break
+			}
+			if err != nil {
+				log.Fatalln(err)
+			}
+
+			req := &pb.UploadAndNotifyProgressRequest{Data: buf[:n]}
+			sendErr := stream.Send(req)
+			if sendErr != nil {
+				log.Fatalln(sendErr)
+			}
+			time.Sleep(1 * time.Second)
+		}
+
+		err := stream.CloseSend()
+		if err != nil {
+			log.Fatalln(err)
+		}
+	}()
+
+	// res
+	ch := make(chan struct{})
+	go func() {
+		for {
+			res, err := stream.Recv()
+			if err == io.EOF {
+				break
+			}
+			if err != nil {
+				log.Fatalln(err)
+			}
+
+			log.Printf("received message: %v", res.GetMessage())
+		}
+		close(ch)
+	}()
+	<-ch
 }
